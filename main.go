@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,7 +27,7 @@ type Task struct {
 }
 
 type Download struct {
-	Url     string
+	Urls    []string
 	Version string
 }
 
@@ -41,17 +42,17 @@ type SubTask struct {
 }
 
 func main() {
-	downloadPath := "D:\\javaEx"
+	downloadPath := "D:\\git_weidian\\env-task-manager"
 	jsonStr := `{
 		    "takeName":"java",
 			"destDir":"java8",
 		    "downloads":[
 		        {
-		            "url":"http:xxxxxxx",
+		            "urls":[
+					"https://codechina.csdn.net/qq_19763819/devlop-env-zip/-/raw/master/java/jdk1.8.0_281.zip?env_fileName=jdk1.8.0_281",
+					"https://codechina.csdn.net/qq_19763819/devlop-env-zip/-/raw/master/java/jre1.8.0_281.zip?env_fileName=jre1.8.0_281"
+					],
 		            "version":"1.8"
-		        },        {
-		            "url":"http:xxxxxxx",
-		            "version":"1.7"
 		        }
 		    ],
 		    "subTasks":[
@@ -76,28 +77,33 @@ func main() {
 	json.Unmarshal([]byte(jsonStr), &javaTask)
 	rootDir := filepath.Join(downloadPath, javaTask.DestDir)
 	os.Setenv("env_task_rootDir", rootDir)
+	os.Setenv("env_task_downloadPath", downloadPath)
 	fmt.Println(rootDir)
-	unzip("jdk8u281.zip", rootDir)
+	for _, v := range downLoadTask(javaTask.TakeName, javaTask.Downloads[0]) {
+		unzipTask(v, rootDir)
+	}
+
+	//
 
 	//执行配置
-	subTasks := javaTask.SubTasks
-	for _, v := range subTasks {
-		v.Value = os.ExpandEnv(v.Value)
-		switch v.Command {
-		case "env_cover":
-			sourceStr := envCover(v)
-			fmt.Printf("%s --覆盖-> %s \n", sourceStr, v.Value)
-		case "env_append":
-			sourceStr, appendStr := envAppend(v)
-			fmt.Printf("%s\n --追加-> \n%s\n ==\n%s\n", sourceStr, v.Value, appendStr)
-		}
-	}
+	/*	subTasks := javaTask.SubTasks
+		for _, v := range subTasks {
+			v.Value = os.ExpandEnv(v.Value)
+			switch v.Command {
+			case "env_cover":
+				sourceStr := envCoverTask(v)
+				fmt.Printf("%s --覆盖-> %s \n", sourceStr, v.Value)
+			case "env_append":
+				sourceStr, appendStr := envAppendTask(v)
+				fmt.Printf("%s\n --追加-> \n%s\n ==\n%s\n", sourceStr, v.Value, appendStr)
+			}
+		}*/
 }
 
 /**
 覆盖
 */
-func envCover(task SubTask) string {
+func envCoverTask(task SubTask) string {
 	key, _ := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\Session Manager\Environment\`, registry.ALL_ACCESS)
 	defer key.Close()
 	source, _, _ := key.GetStringValue(task.Key)
@@ -108,7 +114,7 @@ func envCover(task SubTask) string {
 /**
 追加
 */
-func envAppend(task SubTask) (string, string) {
+func envAppendTask(task SubTask) (string, string) {
 	key, _ := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\Session Manager\Environment\`, registry.ALL_ACCESS)
 	defer key.Close()
 	sourceStr, _, err := key.GetStringValue(task.Key)
@@ -121,7 +127,7 @@ func envAppend(task SubTask) (string, string) {
 	return sourceStr, appendStr
 }
 
-func unzip(zipFile string, destDir string) (string, error) {
+func unzipTask(zipFile string, destDir string) (string, error) {
 	result := ""
 	zipReader, err := zip.OpenReader(zipFile)
 	if err != nil {
@@ -142,9 +148,9 @@ func unzip(zipFile string, destDir string) (string, error) {
 		defer inFile.Close()
 		outFile, _ := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
 		defer outFile.Close()
-		io.Copy(outFile, inFile)
-
+		io.Copy(outFile, io.TeeReader(inFile, &WriteCounter{Total: uint64(f.FileInfo().Size()), path: filePath}))
 	}
+	fmt.Println()
 	return result, nil
 }
 
@@ -177,6 +183,39 @@ func distinct(arrayA []string, set map[string]byte, result []string) []string {
 			set[item] = 1
 			result = append(result, item)
 		}
+	}
+	return result
+}
+
+type WriteCounter struct {
+	Total uint64
+	path  string
+	Index uint64
+}
+
+func (wc *WriteCounter) Write(p []byte) (int, error) {
+	n := len(p)
+	wc.Index += uint64(n)
+	wc.PrintProgress()
+	return n, nil
+}
+
+func (wc WriteCounter) PrintProgress() {
+	fmt.Printf("%s --> %v/%v \r", wc.path, wc.Index, wc.Total)
+}
+func downLoadTask(taskName string, download Download) []string {
+	var result []string
+	for _, v := range download.Urls {
+		req, _ := http.NewRequest("GET", v, nil)
+		fileName := req.URL.Query().Get("env_fileName")
+		downloadPath := taskName + "_" + fileName + ".zip"
+		result = append(result, downloadPath)
+		out, _ := os.Create(downloadPath)
+		defer out.Close()
+		resp, _ := http.Get(v)
+		defer resp.Body.Close()
+		io.Copy(out, io.TeeReader(resp.Body, &WriteCounter{Total: uint64(resp.ContentLength), path: downloadPath}))
+		fmt.Println()
 	}
 	return result
 }
