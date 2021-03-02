@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/beevik/etree"
 	"golang.org/x/sys/windows/registry"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
@@ -39,6 +40,7 @@ type SubTask struct {
 	追加模式中的插入位置-1 代表末尾
 	*/
 	index int
+	XPath string
 }
 
 func main() {
@@ -67,6 +69,12 @@ func main() {
 		            "value":".;%JAVA_HOME%\\lib;%JAVA_HOME%\\lib\\dt.jar;%JAVA_HOME%\\lib\\tools.jar"
 		        },
 				{
+		            "command":"xml_append",
+		            "key":"D:\\javaEx\\apache-maven-3.6.3\\conf\\settings.xml",
+		            "value":"<localRepository>xxxxxx</localRepository>",
+		            "xPath":"./settings"
+		        },
+				{
 					"command":"env_append",
 					"key":"path",
 					"value":"%JAVA_HOME%\\bin"
@@ -79,25 +87,28 @@ func main() {
 	os.Setenv("env_task_rootDir", rootDir)
 	os.Setenv("env_task_downloadPath", downloadPath)
 	fmt.Println(rootDir)
-	for _, v := range downLoadTask(javaTask.TakeName, javaTask.Downloads[0]) {
+
+	/*	for _, v := range downLoadTask(javaTask.TakeName, javaTask.Downloads[0]) {
 		unzipTask(v, rootDir)
-	}
+	}*/
 
 	//
 
 	//执行配置
-	/*	subTasks := javaTask.SubTasks
-		for _, v := range subTasks {
-			v.Value = os.ExpandEnv(v.Value)
-			switch v.Command {
-			case "env_cover":
-				sourceStr := envCoverTask(v)
-				fmt.Printf("%s --覆盖-> %s \n", sourceStr, v.Value)
-			case "env_append":
-				sourceStr, appendStr := envAppendTask(v)
-				fmt.Printf("%s\n --追加-> \n%s\n ==\n%s\n", sourceStr, v.Value, appendStr)
-			}
-		}*/
+	subTasks := javaTask.SubTasks
+	for _, v := range subTasks {
+		v.Value = os.ExpandEnv(v.Value)
+		switch v.Command {
+		case "env_cover":
+			//sourceStr := envCoverTask(v)
+			//fmt.Printf("%s --覆盖-> %s \n", sourceStr, v.Value)
+		case "env_append":
+		//sourceStr, appendStr := envAppendTask(v)
+		//fmt.Printf("%s\n --追加-> \n%s\n ==\n%s\n", sourceStr, v.Value, appendStr)
+		case "xml_append":
+			xmlUpdateValue(v)
+		}
+	}
 }
 
 /**
@@ -218,4 +229,24 @@ func downLoadTask(taskName string, download Download) []string {
 		fmt.Println()
 	}
 	return result
+}
+
+func xmlUpdateValue(task SubTask) {
+	path := task.Key
+	fileName := filepath.Base(path)
+	doc := etree.NewDocument()
+	doc.ReadFromFile(path)
+	el := doc.FindElement(task.XPath)
+	el.AddChild(crateElementFromStr(task.Value))
+	doc.Indent(4)
+	bakPath := filepath.Join(filepath.Dir(path), "dev_task_"+fileName)
+	os.Rename(path, bakPath)
+	doc.WriteToFile(path)
+
+}
+
+func crateElementFromStr(elementStr string) *etree.Element {
+	doc := etree.NewDocument()
+	doc.ReadFromString(elementStr)
+	return doc.ChildElements()[0].Copy()
 }
